@@ -91,12 +91,20 @@ namespace gmath {
                     u.x * v.y - u.y * v.x);
     }
 
+    Vec3 pow(const Vec3& u, const double t) {
+        return Vec3(std::pow(u.x, t), std::pow(u.y, t), std::pow(u.z, t));
+    }
+
     Vec3 operator*(const Vec3& v, const double t) {
         return Vec3(t * v.x, t * v.y, t * v.z);
     }
 
     Vec3 operator*(const double t, const Vec3& v) {
         return v * t;
+    }
+
+    Vec3 operator*(const Vec3& u, const Vec3& v) { // item-wise multiplication
+        return Vec3(u.x * v.x, u.y * v.y, u.z * v.z);
     }
 
     Vec3 operator/(const Vec3& v, const double t) {

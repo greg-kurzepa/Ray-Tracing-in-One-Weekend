@@ -39,9 +39,11 @@ namespace gmath {
     double dot(const Vec3& u, const Vec3& v); // dot product
     // Vec3 operator^(const Vec3& u, const Vec3& v); // cross product
     Vec3 cross(const Vec3& u, const Vec3& v);
+    Vec3 pow(const Vec3& u, const double t);
 
     Vec3 operator*(const Vec3& v, const double t);
     Vec3 operator*(const double t, const Vec3& v);
+    Vec3 operator*(const Vec3& u, const Vec3& v);
     Vec3 operator/(const Vec3& v, const double t);
 
     std::ostream& operator<<(std::ostream& out, const Vec3& v);

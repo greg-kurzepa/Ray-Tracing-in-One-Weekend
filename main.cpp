@@ -54,14 +54,25 @@ class Line3 {
 
 enum class Material {
     matte,
+    metal,
 };
 
 class Hittable {
     public:
+        Material material{Material::matte};
+        Colour reflectance{0.5, 0.5, 0.5};
+        double fuzz{0}; // for metals, should be between 0 and 1
+
+        Hittable() {}
+        Hittable(Material material) : material(material) {}
+        Hittable(Material material, Colour reflectance, double fuzz) : material(material), reflectance(reflectance), fuzz(fuzz) {}
+
         // returns value of t along input ray that causes intersection with the Hittable
         virtual double intersects(const Line3& ray) const = 0;
         // returns vector normal to surface at specified point
-        virtual UnitVec3 get_normal(const Line3& ray, const double t, bool& intersects_outside) const = 0;
+        // virtual UnitVec3 get_normal(const Line3& ray, const double t, bool& intersects_outside) const = 0;
+        //
+        virtual Line3 get_next_ray(const Line3& ray, const double t) const = 0;
 };
 
 // Array of all hittable objects
@@ -72,10 +83,13 @@ class Sphere3 : public Hittable {
     public:
         Vec3 p; // centre
         double r; // radius
-        Material material = Material::matte;
 
         Sphere3() : p(Vec3(0,0,0)), r(0) {}
         Sphere3(Vec3 centre, double radius) : p(Vec3(centre)), r(radius) {}
+
+        // these allow for setting the materials and, if desired, its reflectance
+        Sphere3(Vec3 centre, double radius, Material material) : p(Vec3(centre)), r(radius), Hittable(material) {}
+        Sphere3(Vec3 centre, double radius, Material material, Colour reflectance, double fuzz) : p(Vec3(centre)), r(radius), Hittable(material, reflectance, fuzz) {}
 
         // quadratic equation for intersection has at least one solution (i.e. ray hits sphere) if discriminant >= 0
         double intersects(const Line3& ray) const override {
@@ -94,18 +108,45 @@ class Sphere3 : public Hittable {
             }
         }
 
-        // returns a vector facing outwards from sphere
-        UnitVec3 get_normal(const Line3& ray, const double t, bool& intersects_outside) const override {
-            UnitVec3 normalvec = (ray(t) - p).unit();
-            if (dot(normalvec, ray.d) > 0) { // if intersection is on inside of sphere instead of outside...
+        // // returns a vector facing outwards from sphere
+        // UnitVec3 get_normal(const Line3& ray, const double t, bool& intersects_outside) const override {
+        //     UnitVec3 normalvec = (ray(t) - p).unit();
+        //     if (dot(normalvec, ray.d) > 0) { // if intersection is on inside of sphere instead of outside...
+        //         intersects_outside = false;
+        //         normalvec = -normalvec;
+        //         // std::cout << "INSIDE!";
+        //         inside_count += 1;
+        //         // std::cout << dot(normalvec, intersect_ray) / (normalvec.abs() * intersect_ray.abs());
+        //         if (inside_count < 0) { std::cout << "OVERFLOW\n"; }
+        //     }
+        //     return normalvec;
+        // }
+
+        Line3 get_next_ray(const Line3& ray, const double t) const override {
+            // Find normal unit ray reflection vector & whether the ray hit the object on its outside or inside
+            bool intersects_outside {true};
+            UnitVec3 normal_unit = (ray(t) - p).unit();
+            if (dot(normal_unit, ray.d) > 0) { // if intersection is on inside of sphere instead of outside...
                 intersects_outside = false;
-                normalvec = -normalvec;
-                // std::cout << "INSIDE!";
-                inside_count += 1;
-                // std::cout << dot(normalvec, intersect_ray) / (normalvec.abs() * intersect_ray.abs());
-                if (inside_count < 0) { std::cout << "OVERFLOW\n"; }
+                normal_unit = -normal_unit;
             }
-            return normalvec;
+
+            switch (material) {
+                case Material::matte: {
+                    // New ray for next iteration, selected randomly from a unit sphere tangential to the intersected surface
+                    // As in https://math.stackexchange.com/questions/87230/picking-random-points-in-the-volume-of-sphere-with-uniform-probability
+                    Vec3 X{normal_double(), normal_double(), normal_double()};
+                    // Line3 next_ray{ray(t), normal_unit + (X * std::pow(random_double(), 1.0/3.0) / X.abs())}; // random point *in* sphere
+                    return Line3(ray(t), normal_unit + X / X.abs());
+                }
+                case Material::metal: {
+                    Vec3 X{normal_double(), normal_double(), normal_double()};
+                    return Line3(ray(t), normal_unit - 2*normal_unit*dot(ray.d, normal_unit) + fuzz * X / X.abs());
+                }
+                default:
+                    std::cerr << "Error in Sphere3.get_next_ray(): No material match found";
+                    return Line3(Vec3(0,0,0), Vec3(0,0,0));
+            }
         }
 };
 
@@ -125,51 +166,47 @@ class ImageVec : public gpng::Image {
 /// @brief 
 /// @param n 
 /// @return number of collisions before hit background (light source)
-Colour ray_recur(int n, int recur_max, Line3& ray) {
+Colour ray_recur(int n, Line3& ray) {
 
     // Find closest intersection
     double t {std::numeric_limits<double>::infinity()}; // change this to Tmax if you want 0 < t < Tmax instead of 0 < t < infinity
     int smallest_idx {-1};
     for (int i = 0; i < hittables.size(); i++) {
         double intersect_t = (*hittables[i]).intersects(ray);
-        if (intersect_t < t && intersect_t > 0) {
+        if (intersect_t < t && intersect_t > 0.001) {
             t = intersect_t;
             smallest_idx = i;
         }
     }
-    Hittable* closest_item = hittables[smallest_idx];
+    Hittable* closest_item_ptr = hittables[smallest_idx];
 
     if (smallest_idx != -1) { // if at least one object intersects with the ray...
-        if (n == recur_max - 1) { return Colour(0,0,0); } // return black if recursion count limit recur_max reached
+        if (n == 1) { return Colour(0,0,0); } // return black if recursion count limit recur_max reached
 
-        // Find normal unit ray reflection vector & whether the ray hit the object on its outside or inside
-        bool intersects_outside {true};
-        UnitVec3 normal_unit = (*closest_item).get_normal(ray, t, intersects_outside);
+        Line3 next_ray = (*closest_item_ptr).get_next_ray(ray, t);
 
-        if (!intersects_outside) {
-            return Colour(0,0,255);
-        }
-
-        // New ray for next iteration, selected randomly from a unit sphere tangential to the intersected surface
-        // As in https://math.stackexchange.com/questions/87230/picking-random-points-in-the-volume-of-sphere-with-uniform-probability
-        Vec3 X{normal_double(), normal_double(), normal_double()};
-        // std::cout << (X * std::pow(random_double(), 1.0/3.0) / X.abs());
-        Line3 next_ray{ray(t), normal_unit + (X * std::pow(random_double(), 1.0/3.0) / X.abs())};
-
-        return 0.5 * ray_recur(n+1, recur_max, next_ray);
+        return (*closest_item_ptr).reflectance * ray_recur(n-1, next_ray);
     }
     // 255*((1.0-z_pixel/img.height)*Colour(1.0, 1.0, 1.0) + (z_pixel/img.height)*Colour(0.5, 0.7, 1.0))
-    else { return Colour(255,255,255); }
+    else { // if hit 'sky' (i.e. if nothing else was hit)...
+        double t = 0.5*(ray.d.unit().z + 1.0);
+        return (1.0-t)*Colour(1.0, 1.0, 1.0) + t*Colour(0.5, 0.7, 1.0);
+    }
 }
 
 int main() {
     Camera cam;
     ImageVec img(1920, 1080);
 
-    Sphere3 sphere1(Vec3(0,10,0), 2);
-    Sphere3 sphere2(Vec3(-4,10,0), 2);
-    Sphere3 sphere3(Vec3(4 ,10,0), 2);
-    Sphere3 sphere4(Vec3(0,10,-102), 100);
+    // Sphere3 sphere1(Vec3(0,10,0), 2);
+    // Sphere3 sphere2(Vec3(-4,10,0), 2);
+    // Sphere3 sphere3(Vec3(4,10,0), 2);
+    // Sphere3 sphere4(Vec3(0,10,-102), 100);
+
+    Sphere3 sphere1(Vec3(0,1,0), 0.5, Material::matte, Colour(0.7, 0.3, 0.3), 0);
+    Sphere3 sphere2(Vec3(-1,1,0), 0.5, Material::metal, Colour(0.8, 0.8, 0.8), 0.3);
+    Sphere3 sphere3(Vec3(1,1,0), 0.5, Material::metal, Colour(0.8, 0.6, 0.2), 1.0);
+    Sphere3 sphere4(Vec3(0,1,-100.5), 100, Material::matte, Colour(0.8, 0.8, 0.0), 0);
 
     // Sphere3 sphere1(Vec3(0,1,0), 0.5);
     // Sphere3 sphere2(Vec3(0,1,-100.5), 100);
@@ -193,15 +230,16 @@ int main() {
                 ray.d.y = cam.viewport_dist;
                 ray.d.z = cam.viewport_height*((z_pixel + random_double())/img.height - 0.5);
 
-                // number of bounces of ray before it hit the background
-                int recur_max = 5;
-                running_colour += ray_recur(0, recur_max, ray);
-                if (running_colour.z == 255.0/2.0 && running_colour.abs() == 255.0/2.0) {
-                    std::cout << x_pixel << " " << z_pixel << "\n";
-                }
+                // first argument is maximum recur depth
+                running_colour += ray_recur(5, ray);
             }
 
-            img.set_pixel(x_pixel, img.height - z_pixel - 1, running_colour / (n_antialias + 1));
+            // average
+            running_colour /= n_antialias + 1;
+            // gamma correction, gamma 2 (colour to the power of 1/2)
+            running_colour = pow(running_colour, 0.5);
+            // output colour
+            img.set_pixel(x_pixel, img.height - z_pixel - 1, 255*running_colour);
             // std::cout << inside_count << "\n";
             // inside_count = 0;
         }
