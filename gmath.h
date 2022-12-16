@@ -3,6 +3,7 @@
 #include <cmath>
 #include <iostream>
 #include <cstdlib>
+#include <random>
 
 namespace gmath {
 
@@ -10,6 +11,7 @@ namespace gmath {
 
     double random_double();
     double random_double(double min, double max);
+    double normal_double();
 
     class Vec3 {
         public:

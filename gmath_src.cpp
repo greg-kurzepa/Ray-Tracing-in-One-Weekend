@@ -20,6 +20,13 @@ namespace gmath {
         return min + (max-min)*random_double();
     }
 
+    std::default_random_engine generator;
+    std::normal_distribution<double> distribution(0.0, 1.0);
+
+    double normal_double() {
+        return distribution(generator);
+    }
+
     // Vec3 Class
 
     Vec3::Vec3() : x(0), y(0), z(0) {}
@@ -55,7 +62,7 @@ namespace gmath {
 
     // check performance of this against just using division...
     Vec3 Vec3::unit() const {
-        return *this / this->abs();
+        return *this / abs();
     }
 
     Vec3 operator+(const Vec3& u, const Vec3& v){
@@ -97,7 +104,7 @@ namespace gmath {
     }
 
     std::ostream& operator<<(std::ostream& out, const Vec3& v) {
-        return out << v.x << " " << v.y << " " << v.z;
+        return out << v.x << " " << v.y << " " << v.z << "\n";
     }
 
 }
