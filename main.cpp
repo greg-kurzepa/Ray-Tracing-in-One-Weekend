@@ -55,6 +55,7 @@ class Line3 {
 enum class Material {
     matte,
     metal,
+    glass
 };
 
 class Hittable {
@@ -62,10 +63,15 @@ class Hittable {
         Material material{Material::matte};
         Colour reflectance{0.5, 0.5, 0.5};
         double fuzz{0}; // for metals, should be between 0 and 1
+        double refractive_index{1.5}; // for glass, should be >= 1 (1 for air, 1.5 for glass)
 
         Hittable() {}
-        Hittable(Material material) : material(material) {}
-        Hittable(Material material, Colour reflectance, double fuzz) : material(material), reflectance(reflectance), fuzz(fuzz) {}
+        Hittable(Material material) : material(material) { setup(); }
+        Hittable(Material material, Colour reflectance, double fuzz) : material(material), reflectance(reflectance), fuzz(fuzz) { setup(); }
+        
+        void setup() {
+            if (material == Material::glass) { reflectance = Colour(1.0, 1.0, 1.0); }
+        }
 
         // returns value of t along input ray that causes intersection with the Hittable
         virtual double intersects(const Line3& ray) const = 0;
@@ -143,10 +149,30 @@ class Sphere3 : public Hittable {
                     Vec3 X{normal_double(), normal_double(), normal_double()};
                     return Line3(ray(t), normal_unit - 2*normal_unit*dot(ray.d, normal_unit) + fuzz * X / X.abs());
                 }
+                case Material::glass: {
+                    double refraction_ratio = intersects_outside ? (1.0/refractive_index) : refractive_index;
+                    double cos_theta = -dot(normal_unit, ray.d.unit());
+                    // if (refraction_ratio * sqrt(1.0 - cos_theta*cos_theta) > 1.0 || schlick_reflectance(cos_theta, refraction_ratio) > random_double()) { // if total internal reflection or schlick reflection...
+                    //     return Line3(ray(t), normal_unit - 2*normal_unit*dot(ray.d, normal_unit));
+                    // } else {
+                    Vec3 refracted_ray_perpendicular = refraction_ratio * (ray.d.unit() + normal_unit * cos_theta);
+                    Vec3 refracted_ray_parallel = normal_unit * -sqrt(1.0 - refracted_ray_perpendicular.abs2());
+                    // Vec3 refracted_ray_parallel = normal_unit * -sqrt(1 - refraction_ratio*refraction_ratio*(1 - std::pow(dot(normal_unit, ray.d.unit()), 2)));
+
+                    return Line3(ray(t), refracted_ray_perpendicular + refracted_ray_parallel);
+                    // }
+                }
                 default:
                     std::cerr << "Error in Sphere3.get_next_ray(): No material match found";
                     return Line3(Vec3(0,0,0), Vec3(0,0,0));
             }
+        }
+    
+    private:
+        static double schlick_reflectance(double cos_theta, double reflection_ratio) {
+            double r0 = (1 - reflection_ratio) / (1 + reflection_ratio);
+            r0 = r0*r0;
+            return r0 + (1-r0)*pow((1 - cos_theta), 5);
         }
 };
 
@@ -204,9 +230,16 @@ int main() {
     // Sphere3 sphere4(Vec3(0,10,-102), 100);
 
     Sphere3 sphere1(Vec3(0,1,0), 0.5, Material::matte, Colour(0.7, 0.3, 0.3), 0);
-    Sphere3 sphere2(Vec3(-1,1,0), 0.5, Material::metal, Colour(0.8, 0.8, 0.8), 0.3);
-    Sphere3 sphere3(Vec3(1,1,0), 0.5, Material::metal, Colour(0.8, 0.6, 0.2), 1.0);
+    Sphere3 sphere2(Vec3(-1,1,0), 0.5, Material::metal, Colour(0.8, 0.8, 0.8), 0.0);
+    Sphere3 sphere3(Vec3(1,1,0), 0.5, Material::metal, Colour(0.8, 0.6, 0.2), 0.0);
     Sphere3 sphere4(Vec3(0,1,-100.5), 100, Material::matte, Colour(0.8, 0.8, 0.0), 0);
+
+    // Sphere3 sphere1(Vec3(0,1,0), 0.5, Material::glass);
+    // Sphere3 sphere1(Vec3(0,1,0), 0.5, Material::matte, Colour(0.1, 0.2, 0.5), 0.0);
+    // Sphere3 sphere2(Vec3(-1,1,0), 0.5, Material::glass);
+    // Sphere3 sphere5(Vec3(-1,1,0), -0.4, Material::glass);
+    // Sphere3 sphere3(Vec3(1,1,0), 0.5, Material::metal, Colour(0.8, 0.6, 0.2), 1.0);
+    // Sphere3 sphere4(Vec3(0,1,-100.5), 100, Material::matte, Colour(0.8, 0.8, 0.0), 0);
 
     // Sphere3 sphere1(Vec3(0,1,0), 0.5);
     // Sphere3 sphere2(Vec3(0,1,-100.5), 100);
@@ -214,6 +247,7 @@ int main() {
     hittables.push_back(&sphere2);
     hittables.push_back(&sphere3);
     hittables.push_back(&sphere4);
+    // hittables.push_back(&sphere5);
 
     // render!
     for (double z_pixel = 0; z_pixel < img.height; z_pixel++) {
