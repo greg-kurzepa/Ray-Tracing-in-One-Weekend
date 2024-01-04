@@ -19,58 +19,48 @@ using namespace gmath;
 double min_dist_threshold{0.001}; // minimum distance a point of intersection must be from start of a line to be counted
 int inside_count{0};
 
-// can currently put it wherever you want but cannot change angle or position of viewport relative to camera origin
-// class Camera {
-//     public:
-//         Vec3 origin;
-//         Vec3 centre;
-//         double aspect_ratio;
-//         double viewport_height;
-//         double viewport_width;
-//         const double viewport_dist = 1; // viewport a distance of 1 unit in y direction from camera origin
-
-//         Camera() : origin(Vec3(0,0,0)), aspect_ratio(16.0 / 9.0), viewport_height(2) {
-//         // Camera() : origin(Vec3(0,0,0)), aspect_ratio(1.0 / 1.0), viewport_height(2) {
-//             viewport_width = viewport_height * aspect_ratio;
-//             centre = origin + Vec3(0, viewport_dist, 0);
-//         }
-//         Camera(Vec3 origin, double aspect_ratio, double height) : origin(origin), aspect_ratio(aspect_ratio), viewport_height(height) {
-//             viewport_width = viewport_height * aspect_ratio;
-//             centre = origin + Vec3(0, viewport_dist, 0);
-//         }
-// };
 class Camera {
     public:
-        Vec3 origin;
+        Vec3 up{0,0,1}; // sets the rotation of the field of view box, keeping it viewing "horizontally"
+        double viewport_height{2}; // 2 due to legacy reasons; consider an arbitrary magic number. viewport size is always the same. to change zoom, vary focal_length.
+
         Vec3 viewport_centre;
         Vec3 lookat;
-        Vec3 up{0,1,0}; // sets the rotation of the field of view box, keeping it viewing "horizontally"
+        double aspect_ratio;
+        double focal_length;
+        Vec3 look_direction;
+        double viewport_width;
+        Vec3 origin;
 
         // orthogonal unit vectors to traverse viewport
         Vec3 d_right;
         Vec3 d_up;
 
-        double aspect_ratio;
-        double viewport_height{2}; // 2 due to legacy reasons; consider an arbitrary magic number. viewport size is always the same. to change zoom, vary focal_length.
-        double viewport_width;
-        double focal_length;
-
         // default setting
-        Camera(double aspect_ratio) : origin(Vec3(0,0,0)), viewport_centre(Vec3(0,1,0)),
-            lookat(Vec3(0,2,0)), aspect_ratio(aspect_ratio), viewport_width(viewport_height * aspect_ratio), focal_length(1),
-            d_right(Vec3(1,0,0)), d_up(Vec3(0,0,1)) {}
+        Camera(double aspect_ratio) :
+            viewport_centre(Vec3(0,1,0)),
+            lookat(Vec3(0,2,0)),
+            aspect_ratio(aspect_ratio),
+            focal_length(1),
+            look_direction((lookat - viewport_centre).unit()),
+            viewport_width(viewport_height * aspect_ratio),
+            origin(Vec3(0,0,0)),
+            d_right(Vec3(1,0,0)),
+            d_up(Vec3(0,0,1))
+        {}
 
         // any setting
-        Camera(Vec3 viewport_centre, Vec3 lookat, double aspect_ratio, double focal_length) : viewport_centre(viewport_centre),
-            lookat(lookat), aspect_ratio(aspect_ratio), viewport_width(viewport_height * aspect_ratio), focal_length(focal_length)
-        {
-            viewport_width = viewport_height * aspect_ratio;
-            Vec3 look_direction = (lookat - viewport_centre).unit();
-            origin = viewport_centre - look_direction * focal_length;
-            
-            d_right = cross(look_direction, up).unit();
-            d_up = -cross(d_right, look_direction).unit();
-        }
+        Camera(Vec3 viewport_centre, Vec3 lookat, double aspect_ratio, double focal_length) :
+            viewport_centre(viewport_centre),
+            lookat(lookat),
+            aspect_ratio(aspect_ratio),
+            focal_length(focal_length),
+            look_direction((lookat - viewport_centre).unit()),
+            viewport_width(viewport_height * aspect_ratio),
+            origin(viewport_centre - look_direction * focal_length),
+            d_right(cross(look_direction, up).unit()),
+            d_up(-cross(look_direction, d_right).unit())
+        {}
 };
 
 class Line3 {
@@ -287,7 +277,14 @@ int main() {
     int height{900};
 
     ImageVec img(width, height);
-    Camera cam();
+    double aspect_ratio = static_cast<double>(width) / static_cast<double>(height);
+
+    // default camera
+    // Camera cam(aspect_ratio);
+
+    // Camera(Vec3 viewport_centre, Vec3 lookat, double aspect_ratio, double focal_length)  <- definition
+    // camera from above, behind and to the left
+    Camera cam(Vec3(-2,-1,2), Vec3(0,1,0), aspect_ratio, 10);
 
     // 2 spheres scene
     // Sphere3 sphere1(Vec3(0,4,0), 2, Material::glass, Colour(0.7, 0.3, 0.3), 0);
@@ -319,14 +316,14 @@ int main() {
 
     // render!
     std::cout << "start loop";
-    for (int z_pixel = 0; z_pixel < img.height; z_pixel++) {
-        for (int x_pixel = 0; x_pixel < img.width; x_pixel++) {
+    for (double y_pixel = 0; y_pixel < img.height; y_pixel++) {
+        for (double x_pixel = 0; x_pixel < img.width; x_pixel++) {
             
             // select a ray and print out its coordinates
-            int x_trace = 800;
-            int z_trace = 708;
+            double x_trace = 800;
+            double y_trace = 708;
             bool do_trace = false;
-            if (z_pixel == z_trace && x_pixel == x_trace) {
+            if (x_pixel == x_trace && y_pixel == y_trace) {
                 do_trace = true;
                 std::cout << "Doing trace!\n";
             }
@@ -339,13 +336,13 @@ int main() {
                 // Make ray
                 Line3 ray;
                 ray.p = cam.origin;
-                ray.d.x = cam.viewport_width*((x_pixel + random_double())/img.width - 0.5);
-                ray.d.y = cam.viewport_dist;
-                ray.d.z = cam.viewport_height*((z_pixel + random_double())/img.height - 0.5);
+                ray.d += cam.look_direction * cam.focal_length;
+                ray.d += cam.d_right * cam.viewport_width*((x_pixel + random_double())/img.width - 0.5);
+                ray.d += cam.d_up * cam.viewport_height*((y_pixel + random_double())/img.height - 0.5);
                 ray.d = ray.d.unit();
 
                 // first argument is maximum recur depth
-                running_colour += ray_recur(50, ray, do_trace); // start with refractive_index=1 (air)
+                running_colour += ray_recur(10, ray, do_trace); // start with refractive_index=1 (air)
             }
             // average
             running_colour /= n_antialias + 1;
@@ -354,9 +351,9 @@ int main() {
             running_colour = pow(running_colour, 0.5);
             // output colour (if tracing this pixel, give it a colour in the image to verify what we are tracing)
             if (do_trace) {
-                img.set_pixel(x_pixel, img.height - z_pixel - 1, Colour(0,255,0));
+                img.set_pixel(x_pixel, img.height - y_pixel - 1, Colour(0,255,0));
             } else {
-                img.set_pixel(x_pixel, img.height - z_pixel - 1, 255*running_colour);
+                img.set_pixel(x_pixel, img.height - y_pixel - 1, 255*running_colour);
             }
         }
     }
