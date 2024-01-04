@@ -1,9 +1,5 @@
-#pragma once
-
-#include <cmath>
-#include <iostream>
-#include <cstdlib>
-#include <random>
+#ifndef GMATH
+#define GMATH
 
 namespace gmath {
 
@@ -51,3 +47,5 @@ namespace gmath {
     using Colour = Vec3;
 
 }
+
+#endif // GMATH
