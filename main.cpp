@@ -20,23 +20,56 @@ double min_dist_threshold{0.001}; // minimum distance a point of intersection mu
 int inside_count{0};
 
 // can currently put it wherever you want but cannot change angle or position of viewport relative to camera origin
+// class Camera {
+//     public:
+//         Vec3 origin;
+//         Vec3 centre;
+//         double aspect_ratio;
+//         double viewport_height;
+//         double viewport_width;
+//         const double viewport_dist = 1; // viewport a distance of 1 unit in y direction from camera origin
+
+//         Camera() : origin(Vec3(0,0,0)), aspect_ratio(16.0 / 9.0), viewport_height(2) {
+//         // Camera() : origin(Vec3(0,0,0)), aspect_ratio(1.0 / 1.0), viewport_height(2) {
+//             viewport_width = viewport_height * aspect_ratio;
+//             centre = origin + Vec3(0, viewport_dist, 0);
+//         }
+//         Camera(Vec3 origin, double aspect_ratio, double height) : origin(origin), aspect_ratio(aspect_ratio), viewport_height(height) {
+//             viewport_width = viewport_height * aspect_ratio;
+//             centre = origin + Vec3(0, viewport_dist, 0);
+//         }
+// };
 class Camera {
     public:
         Vec3 origin;
-        Vec3 centre;
-        double aspect_ratio;
-        double viewport_height;
-        double viewport_width;
-        const double viewport_dist = 1; // viewport a distance of 1 unit in y direction from camera origin
+        Vec3 viewport_centre;
+        Vec3 lookat;
+        Vec3 up{0,1,0}; // sets the rotation of the field of view box, keeping it viewing "horizontally"
 
-        Camera() : origin(Vec3(0,0,0)), aspect_ratio(16.0 / 9.0), viewport_height(2) {
-        // Camera() : origin(Vec3(0,0,0)), aspect_ratio(1.0 / 1.0), viewport_height(2) {
+        // orthogonal unit vectors to traverse viewport
+        Vec3 d_right;
+        Vec3 d_up;
+
+        double aspect_ratio;
+        double viewport_height{2}; // 2 due to legacy reasons; consider an arbitrary magic number. viewport size is always the same. to change zoom, vary focal_length.
+        double viewport_width;
+        double focal_length;
+
+        // default setting
+        Camera(double aspect_ratio) : origin(Vec3(0,0,0)), viewport_centre(Vec3(0,1,0)),
+            lookat(Vec3(0,2,0)), aspect_ratio(aspect_ratio), viewport_width(viewport_height * aspect_ratio), focal_length(1),
+            d_right(Vec3(1,0,0)), d_up(Vec3(0,0,1)) {}
+
+        // any setting
+        Camera(Vec3 viewport_centre, Vec3 lookat, double aspect_ratio, double focal_length) : viewport_centre(viewport_centre),
+            lookat(lookat), aspect_ratio(aspect_ratio), viewport_width(viewport_height * aspect_ratio), focal_length(focal_length)
+        {
             viewport_width = viewport_height * aspect_ratio;
-            centre = origin + Vec3(0, viewport_dist, 0);
-        }
-        Camera(Vec3 origin, double aspect_ratio, double height) : origin(origin), aspect_ratio(aspect_ratio), viewport_height(height) {
-            viewport_width = viewport_height * aspect_ratio;
-            centre = origin + Vec3(0, viewport_dist, 0);
+            Vec3 look_direction = (lookat - viewport_centre).unit();
+            origin = viewport_centre - look_direction * focal_length;
+            
+            d_right = cross(look_direction, up).unit();
+            d_up = -cross(d_right, look_direction).unit();
         }
 };
 
@@ -125,6 +158,7 @@ class Sphere3 : public Hittable {
         Line3 get_next_ray(const Line3& ray, const double t) const override {
             // Find normal unit ray reflection vector
             Vec3 normal_unit = (ray(t) - p).unit(); // normal unit vector to sphere pointing out of sphere surface
+            Line3 ret_ray;
 
             switch (material) {
                 case Material::matte: {
@@ -132,11 +166,13 @@ class Sphere3 : public Hittable {
                     // As in https://math.stackexchange.com/questions/87230/picking-random-points-in-the-volume-of-sphere-with-uniform-probability
                     Vec3 X{normal_double(), normal_double(), normal_double()};
                     // Line3 next_ray{ray(t), normal_unit + (X * std::pow(random_double(), 1.0/3.0) / X.abs())}; // random point *in* sphere
-                    return Line3(ray(t), (normal_unit + X / X.abs()).unit());
+                    ret_ray = Line3(ray(t), (normal_unit + X / X.abs()));
+                    break;
                 }
                 case Material::metal: {
                     Vec3 X{normal_double(), normal_double(), normal_double()};
-                    return Line3(ray(t), (normal_unit - 2*normal_unit*dot(ray.d, normal_unit) + fuzz * X / X.abs()).unit());
+                    ret_ray = Line3(ray(t), ray.d - 2*normal_unit*dot(ray.d, normal_unit) + fuzz * X / X.abs());
+                    break;
                 }
                 case Material::glass: {
                     // possibilities: 
@@ -160,19 +196,21 @@ class Sphere3 : public Hittable {
                         std::cout << "COS NEGATIVE: " << cos_theta << "\n"; 
                     }
 
-                    if (refraction_ratio * sqrt(1.0 - cos_theta*cos_theta) > 1.0) {// || schlick_reflectance(cos_theta, refraction_ratio) > random_double()) { // if total internal reflection or schlick reflection...
-                        return Line3(ray(t), normal_unit - 2*normal_unit*dot(ray.d, normal_unit)); // reflect
+                    if (refraction_ratio * sqrt(1.0 - cos_theta*cos_theta) > 1.0 || schlick_reflectance(cos_theta, refraction_ratio) > random_double()) { // if total internal reflection or schlick reflection...
+                        ret_ray = Line3(ray(t), ray.d - 2*normal_unit*dot(ray.d, normal_unit)); // reflect
                     } else {
                         Vec3 refracted_ray_perpendicular = refraction_ratio * (ray.d.unit() + normal_unit * cos_theta);
                         Vec3 refracted_ray_parallel = normal_unit * -sqrt(fabs(1.0 - refracted_ray_perpendicular.abs2()));
-
-                        return Line3(ray(t), (refracted_ray_perpendicular + refracted_ray_parallel).unit());
+                        ret_ray = Line3(ray(t), refracted_ray_perpendicular + refracted_ray_parallel);
                     }
+                    break;
                 }
                 default:
                     std::cerr << "Error in Sphere3.get_next_ray(): No material match found";
                     return Line3(Vec3(0,0,0), Vec3(0,0,0));
             }
+            ret_ray.d = ret_ray.d.unit();
+            return ret_ray;
         }
     
     private:
@@ -224,30 +262,32 @@ Colour ray_recur(int n, Line3& ray, bool do_trace) {
 
     } else { // if hit 'sky' (i.e. if nothing else was hit)...
         // rtow colour scheme
-        // double t = 0.5*(ray.d.unit().z + 1.0);
-        // return (1.0-t)*Colour(1.0, 1.0, 1.0) + t*Colour(0.5, 0.7, 1.0);
+        double t = 0.5*(ray.d.unit().z + 1.0);
+        return (1.0-t)*Colour(1.0, 1.0, 1.0) + t*Colour(0.5, 0.7, 1.0);
 
         // quadrants colour scheme
-        if (ray.d.unit().x >=0) {
-            if (ray.d.unit().z >= 0) {
-                return Colour(0.0, 0.0, 0.0); // top-right black
-            } else {
-                return Colour(1.0, 0.0, 0.0); // bottom-right red
-            }
-        } else {
-            if (ray.d.unit().z >= 0) {
-                return Colour(0.0, 0.0, 1.0); // top-left blue
-            } else {
-                return Colour(0.0, 1.0, 0.0); // bottom-left green
-            }
-        }
+        // if (ray.d.unit().x >=0) {
+        //     if (ray.d.unit().z >= 0) {
+        //         return Colour(0.0, 0.0, 0.0); // top-right black
+        //     } else {
+        //         return Colour(1.0, 0.0, 0.0); // bottom-right red
+        //     }
+        // } else {
+        //     if (ray.d.unit().z >= 0) {
+        //         return Colour(0.0, 0.0, 1.0); // top-left blue
+        //     } else {
+        //         return Colour(0.0, 1.0, 0.0); // bottom-left green
+        //     }
+        // }
     }
 }
 
 int main() {
-    Camera cam;
-    // ImageVec img(1920,1080);
-    ImageVec img(1600,900);
+    int width{1600};
+    int height{900};
+
+    ImageVec img(width, height);
+    Camera cam();
 
     // 2 spheres scene
     // Sphere3 sphere1(Vec3(0,4,0), 2, Material::glass, Colour(0.7, 0.3, 0.3), 0);
@@ -259,23 +299,23 @@ int main() {
     // Sphere3 sphere3(Vec3(1,1,0), 0.5, Material::metal, Colour(0.8, 0.6, 0.2), 0.0);
     // Sphere3 sphere4(Vec3(0,1,-100.5), 100, Material::matte, Colour(0.8, 0.8, 0.0), 0);
 
-    // // Ray Tracing in One Weekend scene
-    // Sphere3 sphere1(Vec3(0,1,-100.5), 100, Material::matte, Colour(0.8,0.8,0.0), 0);
-    // Sphere3 sphere2(Vec3(0,1,0), 0.5, Material::matte, Colour(0.1,0.2,0.5), 0);
-    // Sphere3 sphere3(Vec3(1,1,0), 0.5, Material::metal, Colour(0.8,0.6,0.2), 0);
-    // // hollow glass sphere
-    // Sphere3 sphere4(Vec3(-1,1,0), 0.5, Material::glass, Colour(0.8,0.8,0.8), 0);
-    // Sphere3 sphere5(Vec3(-1,1,0), 0.4, Material::glass, Colour(0.8,0.8,0.8), 0, true);
+    // Ray Tracing in One Weekend scene
+    Sphere3 sphere1(Vec3(0,1,-100.5), 100, Material::matte, Colour(0.8,0.8,0.0), 0);
+    Sphere3 sphere2(Vec3(0,1,0), 0.5, Material::matte, Colour(0.1,0.2,0.5), 0);
+    Sphere3 sphere3(Vec3(1,1,0), 0.5, Material::metal, Colour(0.8,0.6,0.2), 0);
+    // hollow glass sphere
+    Sphere3 sphere4(Vec3(-1,1,0), 0.5, Material::glass, Colour(0.8,0.8,0.8), 0);
+    Sphere3 sphere5(Vec3(-1,1,0), 0.4, Material::glass, Colour(0.8,0.8,0.8), 0, true);
 
     // refraction test scene
-    Sphere3 sphere1(Vec3(0,1,0), 0.5, Material::glass, Colour(0.8,0.8,0.8), 0);
-    Sphere3 sphere2(Vec3(0,1,0), 0.4, Material::glass, Colour(0.8,0.8,0.8), 0, true);
+    // Sphere3 sphere1(Vec3(0,1,0), 0.5, Material::glass, Colour(0.8,0.8,0.8), 0);
+    // Sphere3 sphere2(Vec3(0,1,0), 0.4, Material::glass, Colour(0.8,0.8,0.8), 0, true);
 
     hittables.push_back(&sphere1);
-    // hittables.push_back(&sphere2);
-    // hittables.push_back(&sphere3);
-    // hittables.push_back(&sphere4);
-    // hittables.push_back(&sphere5);
+    hittables.push_back(&sphere2);
+    hittables.push_back(&sphere3);
+    hittables.push_back(&sphere4);
+    hittables.push_back(&sphere5);
 
     // render!
     std::cout << "start loop";
@@ -283,8 +323,8 @@ int main() {
         for (int x_pixel = 0; x_pixel < img.width; x_pixel++) {
             
             // select a ray and print out its coordinates
-            int z_trace = 450;
-            int x_trace = 1080;
+            int x_trace = 800;
+            int z_trace = 708;
             bool do_trace = false;
             if (z_pixel == z_trace && x_pixel == x_trace) {
                 do_trace = true;
@@ -293,31 +333,22 @@ int main() {
 
             Colour running_colour{0,0,0};
 
-            // // n_antialias rays for antialiasing
-            // int n_antialias = 4;
-            // for (int i = 0; i < n_antialias; i++) {
-            //     // Make ray
-            //     Line3 ray;
-            //     ray.p = cam.origin;
-            //     ray.d.x = cam.viewport_width*((x_pixel + random_double())/img.width - 0.5);
-            //     ray.d.y = cam.viewport_dist;
-            //     ray.d.z = cam.viewport_height*((z_pixel + random_double())/img.height - 0.5);
+            // n_antialias rays for antialiasing
+            int n_antialias = 4;
+            for (int i = 0; i < n_antialias; i++) {
+                // Make ray
+                Line3 ray;
+                ray.p = cam.origin;
+                ray.d.x = cam.viewport_width*((x_pixel + random_double())/img.width - 0.5);
+                ray.d.y = cam.viewport_dist;
+                ray.d.z = cam.viewport_height*((z_pixel + random_double())/img.height - 0.5);
+                ray.d = ray.d.unit();
 
-            //     // first argument is maximum recur depth
-            //     running_colour += ray_recur(10, ray, do_trace); // start with refractive_index=1 (air)
-            // }
-            // // average
-            // running_colour /= n_antialias + 1;
-
-            // no antialiasing
-            // Make ray
-            Line3 ray;
-            ray.p = cam.origin;
-            ray.d.x = cam.viewport_width*((x_pixel + 0.5)/img.width - 0.5);
-            ray.d.y = cam.viewport_dist;
-            ray.d.z = cam.viewport_height*((z_pixel + 0.5)/img.height - 0.5);
-            // first argument is maximum recur depth
-            running_colour = ray_recur(10, ray, do_trace); // start with refractive_index=1 (air)
+                // first argument is maximum recur depth
+                running_colour += ray_recur(50, ray, do_trace); // start with refractive_index=1 (air)
+            }
+            // average
+            running_colour /= n_antialias + 1;
 
             // gamma correction, gamma 2 (colour to the power of 1/2)
             running_colour = pow(running_colour, 0.5);
