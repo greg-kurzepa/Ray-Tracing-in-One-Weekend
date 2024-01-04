@@ -148,10 +148,6 @@ namespace gpng {
         return image[row * width * 3 + column * 3 + colour];
     }
 
-    void Image::close() {
-        delete[] image;
-    }
-
     void Image::save(std::string filename) {
         std::ofstream image_write;
         image_write.open(filename, std::ios::out | std::ios::binary);

@@ -19,7 +19,6 @@ namespace gpng {
             ~Image();
 
             uint8_t& operator()(int column, int row, int colour);
-            void close();
             void save(std::string filename);
             void deflate_no_compression(std::vector<uint8_t>& buffer);
     };

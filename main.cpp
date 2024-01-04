@@ -16,9 +16,6 @@
 #include "gpng.h"
 
 using namespace gmath;
-// UnitVec3 has no extra functionality on top of Vec3, it is simply a semantic way of keeping track of vectors that are *meant* to be unit vectors.
-using UnitVec3 = Vec3;
-
 double min_dist_threshold{0.001}; // minimum distance a point of intersection must be from start of a line to be counted
 int inside_count{0};
 
@@ -125,24 +122,9 @@ class Sphere3 : public Hittable {
             }
         }
 
-        // // returns a vector facing outwards from sphere
-        // UnitVec3 get_normal(const Line3& ray, const double t, bool& intersects_outside) const override {
-        //     UnitVec3 normalvec = (ray(t) - p).unit();
-        //     if (dot(normalvec, ray.d) > 0) { // if intersection is on inside of sphere instead of outside...
-        //         intersects_outside = false;
-        //         normalvec = -normalvec;
-        //         // std::cout << "INSIDE!";
-        //         inside_count += 1;
-        //         // std::cout << dot(normalvec, intersect_ray) / (normalvec.abs() * intersect_ray.abs());
-        //         if (inside_count < 0) { std::cout << "OVERFLOW\n"; }
-        //     }
-        //     return normalvec;
-        // }
-
         Line3 get_next_ray(const Line3& ray, const double t) const override {
-            // Find normal unit ray reflection vector & whether the ray hit the object on its outside or inside
-            bool intersects_outside {true};
-            UnitVec3 normal_unit = (ray(t) - p).unit(); // normal unit vector to sphere pointing out of sphere surface
+            // Find normal unit ray reflection vector
+            Vec3 normal_unit = (ray(t) - p).unit(); // normal unit vector to sphere pointing out of sphere surface
 
             switch (material) {
                 case Material::matte: {
@@ -157,16 +139,26 @@ class Sphere3 : public Hittable {
                     return Line3(ray(t), (normal_unit - 2*normal_unit*dot(ray.d, normal_unit) + fuzz * X / X.abs()).unit());
                 }
                 case Material::glass: {
-                    if (dot(normal_unit, ray.d) > 0) { // if intersection is on inside of sphere instead of outside...
-                        intersects_outside = false;
+                    // possibilities: 
+                    // entering always -ve to normal
+                    // -> Normal sphere: normal_unit correct; refraction ratio 1/1.5
+                    // -> Hollow section: normal_unit correct; refraction ratio 1.5
+                    // leaving always +ve to normal
+                    // -> Normal sphere: normal_unit inverted; refraction ratio 1.5
+                    // -> Hollow section: normal_unit inverted; refraction ratio 1/1.5
+                    
+                    double refraction_ratio;
+                    if (dot(normal_unit, ray.d) > 0) { // if ray going from inside to outside...
                         normal_unit = -normal_unit;
+                        refraction_ratio = is_hollow ? 1.0/refractive_index : refractive_index;
+                    } else { // if ray going from outside to inside...
+                        refraction_ratio = is_hollow ? refractive_index : 1.0/refractive_index;
                     }
-                    if (is_hollow) {
-                        intersects_outside = !intersects_outside;
-                        // normal_unit = -normal_unit;
-                    }
-                    double refraction_ratio = intersects_outside ? (1.0/refractive_index) : refractive_index;
+
                     double cos_theta = -dot(normal_unit, ray.d.unit());
+                    if (cos_theta < 0) {
+                        std::cout << "COS NEGATIVE: " << cos_theta << "\n"; 
+                    }
 
                     if (refraction_ratio * sqrt(1.0 - cos_theta*cos_theta) > 1.0) {// || schlick_reflectance(cos_theta, refraction_ratio) > random_double()) { // if total internal reflection or schlick reflection...
                         return Line3(ray(t), normal_unit - 2*normal_unit*dot(ray.d, normal_unit)); // reflect
@@ -223,19 +215,32 @@ Colour ray_recur(int n, Line3& ray, bool do_trace) {
         }
     }
     if (do_trace) { std::cout << "smallest_idx: " << smallest_idx << "\n"; }
-    Hittable* closest_item_ptr = hittables[smallest_idx];
 
     if (smallest_idx != -1) { // if at least one object intersects with the ray...
         if (n == 1) { return Colour(0,0,0); } // return black if recursion count limit recur_max reached
-
+        Hittable* closest_item_ptr = hittables[smallest_idx];
         Line3 next_ray = closest_item_ptr->get_next_ray(ray, t);
-
         return closest_item_ptr->reflectance * ray_recur(n-1, next_ray, do_trace);
-    }
-    // 255*((1.0-z_pixel/img.height)*Colour(1.0, 1.0, 1.0) + (z_pixel/img.height)*Colour(0.5, 0.7, 1.0))
-    else { // if hit 'sky' (i.e. if nothing else was hit)...
-        double t = 0.5*(ray.d.unit().z + 1.0);
-        return (1.0-t)*Colour(1.0, 1.0, 1.0) + t*Colour(0.5, 0.7, 1.0);
+
+    } else { // if hit 'sky' (i.e. if nothing else was hit)...
+        // rtow colour scheme
+        // double t = 0.5*(ray.d.unit().z + 1.0);
+        // return (1.0-t)*Colour(1.0, 1.0, 1.0) + t*Colour(0.5, 0.7, 1.0);
+
+        // quadrants colour scheme
+        if (ray.d.unit().x >=0) {
+            if (ray.d.unit().z >= 0) {
+                return Colour(0.0, 0.0, 0.0); // top-right black
+            } else {
+                return Colour(1.0, 0.0, 0.0); // bottom-right red
+            }
+        } else {
+            if (ray.d.unit().z >= 0) {
+                return Colour(0.0, 0.0, 1.0); // top-left blue
+            } else {
+                return Colour(0.0, 1.0, 0.0); // bottom-left green
+            }
+        }
     }
 }
 
@@ -254,21 +259,26 @@ int main() {
     // Sphere3 sphere3(Vec3(1,1,0), 0.5, Material::metal, Colour(0.8, 0.6, 0.2), 0.0);
     // Sphere3 sphere4(Vec3(0,1,-100.5), 100, Material::matte, Colour(0.8, 0.8, 0.0), 0);
 
-    // Ray Tracing in One Weekend scene
-    Sphere3 sphere1(Vec3(0,1,-100.5), 100, Material::matte, Colour(0.8,0.8,0.0), 0);
-    Sphere3 sphere2(Vec3(0,1,0), 0.5, Material::matte, Colour(0.1,0.2,0.5), 0);
-    Sphere3 sphere3(Vec3(1,1,0), 0.5, Material::metal, Colour(0.8,0.6,0.2), 0);
-    // hollow glass sphere
-    Sphere3 sphere4(Vec3(-1,1,0), 0.5, Material::glass, Colour(0.8,0.8,0.8), 0);
-    Sphere3 sphere5(Vec3(-1,1,0), 0.4, Material::glass, Colour(0.8,0.8,0.8), 0, true);
+    // // Ray Tracing in One Weekend scene
+    // Sphere3 sphere1(Vec3(0,1,-100.5), 100, Material::matte, Colour(0.8,0.8,0.0), 0);
+    // Sphere3 sphere2(Vec3(0,1,0), 0.5, Material::matte, Colour(0.1,0.2,0.5), 0);
+    // Sphere3 sphere3(Vec3(1,1,0), 0.5, Material::metal, Colour(0.8,0.6,0.2), 0);
+    // // hollow glass sphere
+    // Sphere3 sphere4(Vec3(-1,1,0), 0.5, Material::glass, Colour(0.8,0.8,0.8), 0);
+    // Sphere3 sphere5(Vec3(-1,1,0), 0.4, Material::glass, Colour(0.8,0.8,0.8), 0, true);
+
+    // refraction test scene
+    Sphere3 sphere1(Vec3(0,1,0), 0.5, Material::glass, Colour(0.8,0.8,0.8), 0);
+    Sphere3 sphere2(Vec3(0,1,0), 0.4, Material::glass, Colour(0.8,0.8,0.8), 0, true);
 
     hittables.push_back(&sphere1);
-    hittables.push_back(&sphere2);
-    hittables.push_back(&sphere3);
-    hittables.push_back(&sphere4);
-    hittables.push_back(&sphere5);
+    // hittables.push_back(&sphere2);
+    // hittables.push_back(&sphere3);
+    // hittables.push_back(&sphere4);
+    // hittables.push_back(&sphere5);
 
     // render!
+    std::cout << "start loop";
     for (int z_pixel = 0; z_pixel < img.height; z_pixel++) {
         for (int x_pixel = 0; x_pixel < img.width; x_pixel++) {
             
@@ -282,22 +292,33 @@ int main() {
             }
 
             Colour running_colour{0,0,0};
-            // n_antialias rays for antialiasing
-            int n_antialias = 4;
-            for (int i = 0; i < n_antialias; i++) {
-                // Make ray
-                Line3 ray;
-                ray.p = cam.origin;
-                ray.d.x = cam.viewport_width*((x_pixel + random_double())/img.width - 0.5);
-                ray.d.y = cam.viewport_dist;
-                ray.d.z = cam.viewport_height*((z_pixel + random_double())/img.height - 0.5);
 
-                // first argument is maximum recur depth
-                running_colour += ray_recur(10, ray, do_trace);
-            }
+            // // n_antialias rays for antialiasing
+            // int n_antialias = 4;
+            // for (int i = 0; i < n_antialias; i++) {
+            //     // Make ray
+            //     Line3 ray;
+            //     ray.p = cam.origin;
+            //     ray.d.x = cam.viewport_width*((x_pixel + random_double())/img.width - 0.5);
+            //     ray.d.y = cam.viewport_dist;
+            //     ray.d.z = cam.viewport_height*((z_pixel + random_double())/img.height - 0.5);
 
-            // average
-            running_colour /= n_antialias + 1;
+            //     // first argument is maximum recur depth
+            //     running_colour += ray_recur(10, ray, do_trace); // start with refractive_index=1 (air)
+            // }
+            // // average
+            // running_colour /= n_antialias + 1;
+
+            // no antialiasing
+            // Make ray
+            Line3 ray;
+            ray.p = cam.origin;
+            ray.d.x = cam.viewport_width*((x_pixel + 0.5)/img.width - 0.5);
+            ray.d.y = cam.viewport_dist;
+            ray.d.z = cam.viewport_height*((z_pixel + 0.5)/img.height - 0.5);
+            // first argument is maximum recur depth
+            running_colour = ray_recur(10, ray, do_trace); // start with refractive_index=1 (air)
+
             // gamma correction, gamma 2 (colour to the power of 1/2)
             running_colour = pow(running_colour, 0.5);
             // output colour (if tracing this pixel, give it a colour in the image to verify what we are tracing)
@@ -308,6 +329,7 @@ int main() {
             }
         }
     }
+    std::cout << "end loop";
 
     std::stringstream string_stream;
     string_stream << "images/" << time(NULL) << ".png";
