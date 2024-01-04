@@ -1,3 +1,7 @@
+#include <cmath>
+#include <iostream>
+#include <cstdlib>
+#include <random>
 #include "gmath.h"
 
 namespace gmath {

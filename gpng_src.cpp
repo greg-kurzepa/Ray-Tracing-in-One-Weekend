@@ -6,6 +6,7 @@
 #include <fstream>
 #include <vector>
 #include <string>
+#include <cstdint>
 #include "gpng.h"
 
 // CRC Generator
@@ -95,7 +96,7 @@ static void print_buffer(T val_ptr, size_t length, bool reverse = true) {
 
 // Writes a vector array of bytes into a given file
 static void write_list(std::ofstream& image, const uint8_t* val, size_t length) {
-    for (int i = 0; i < length; ++i) {
+    for (size_t i = 0; i < length; ++i) {
         image << static_cast<unsigned char>(*(val + i));
     }
 }
@@ -115,7 +116,7 @@ template <typename T>
 static void push_to_buffer(std::vector<uint8_t>& buffer, T val_ptr, size_t length, bool reverse = true) {
     uint8_t* start = reinterpret_cast<uint8_t*>(val_ptr);
 
-    for (int i = 0; i < length; ++i) {
+    for (size_t i = 0; i < length; ++i) {
         if (reverse == true) {
             buffer.push_back(*(start + length - 1 - i));
         } else {

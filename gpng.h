@@ -1,9 +1,9 @@
-#pragma once
+#ifndef GPNG
+#define GPNG
 
-#include <string>
 #include <vector>
-
-#include "gmath.h"
+#include <cstdint>
+#include <string>
 
 namespace gpng {
 
@@ -25,3 +25,5 @@ namespace gpng {
     };
 
 }
+
+#endif // GPNG
