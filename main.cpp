@@ -19,56 +19,6 @@ using namespace gmath;
 double min_dist_threshold{0.001}; // minimum distance a point of intersection must be from start of a line to be counted
 int inside_count{0};
 
-class Camera {
-    public:
-        Vec3 up{0,0,1}; // sets the rotation of the field of view box, keeping it viewing "horizontally"
-        double viewport_height{2}; // 2 due to legacy reasons; consider an arbitrary magic number. viewport size is always the same. to change zoom, vary focal_length.
-
-        Vec3 viewport_centre;
-        Vec3 lookat;
-        double aspect_ratio;
-        double fov_deg; // field of view angle
-        double defocus_blur_angle_deg;
-
-        double focal_length;
-        double defocus_blur_radius;
-        Vec3 look_direction;
-        double viewport_width;
-        Vec3 origin;
-        // orthogonal unit vectors to traverse viewport
-        Vec3 d_right;
-        Vec3 d_up;
-
-        // default setting
-        Camera(double aspect_ratio) :
-            viewport_centre(Vec3(0,1,0)),
-            lookat(Vec3(0,2,0)),
-            aspect_ratio(aspect_ratio),
-            fov_deg(90),
-            defocus_blur_angle_deg(10)
-        { setup(); }
-
-        // any setting
-        Camera(Vec3 viewport_centre, Vec3 lookat, double aspect_ratio, double fov_deg, double defocus_blur_angle_deg) :
-            viewport_centre(viewport_centre),
-            lookat(lookat),
-            aspect_ratio(aspect_ratio),
-            fov_deg(fov_deg),
-            defocus_blur_angle_deg(defocus_blur_angle_deg)
-        { setup(); }
-
-        void setup() {
-            focal_length = (lookat - viewport_centre).abs();;
-            defocus_blur_radius = focal_length * tan(defocus_blur_angle_deg * pi/180 * 0.5); // focal_length * tan(theta/2)
-            std::cout << "DEFOCUS BLUR RADIUS: " << defocus_blur_radius << "\n";
-            look_direction = (lookat - viewport_centre).unit();
-            viewport_width = viewport_height * aspect_ratio;
-            origin = viewport_centre - look_direction * focal_length;
-            d_right = cross(look_direction, up).unit();
-            d_up = -cross(look_direction, d_right).unit();
-        }
-};
-
 class Line3 {
     public:
         // line defined by a point it intesects and a direction
@@ -80,6 +30,80 @@ class Line3 {
 
         Vec3 operator()(const double t) const {  // get position vector at a point t along line
             return p + t*d;
+        }
+};
+
+class Camera {
+    // explanation:
+    // the viewport, also the plane of perfect focus, go where the camera is looking
+    // thus lookat is also the viewport centre
+    // focal_length is the distance from the origin to the viewport centre
+    // rays start from the origin
+    // when using defocus blur, rays start randomly from a disc centred on the origin and parallel to the viewport plane
+    
+    public:
+        Vec3 up{0,0,1}; // sets the rotation of the field of view box, keeping it viewing "horizontally"
+        Vec3 lookat;
+        Vec3 look_direction;
+        double viewport_height;
+        double aspect_ratio;
+        double fov_deg; // field of view angle
+        double defocus_blur_angle_deg;
+
+        double focal_length;
+        double defocus_blur_radius;
+        double viewport_width;
+        Vec3 origin;
+        // orthogonal unit vectors to traverse viewport
+        Vec3 d_right;
+        Vec3 d_up;
+
+        // default setting
+        Camera(double aspect_ratio) :
+            lookat(Vec3(0,0,0)),
+            look_direction(Vec3(0,1,0)),
+            viewport_height(2.0),
+            aspect_ratio(aspect_ratio),
+            fov_deg(90),
+            defocus_blur_angle_deg(0)
+        { setup(); }
+
+        // any setting
+        Camera(double aspect_ratio, Vec3 lookat, Vec3 look_direction, double viewport_height, double fov_deg, double defocus_blur_angle_deg) :
+            lookat(lookat),
+            look_direction(look_direction.unit()),
+            viewport_height(viewport_height),
+            aspect_ratio(aspect_ratio),
+            fov_deg(fov_deg),
+            defocus_blur_angle_deg(defocus_blur_angle_deg)
+        { setup(); }
+
+        void setup() {
+            focal_length = viewport_height / (2 * tan(fov_deg * pi/180 * 0.5)); // viewport_height / (2 * tan(theta/2))
+            defocus_blur_radius = focal_length * tan(defocus_blur_angle_deg * pi/180 * 0.5); // focal_length * tan(theta/2)
+            viewport_width = viewport_height * aspect_ratio;
+            origin = lookat - look_direction * focal_length;
+            d_right = cross(look_direction, up).unit();
+            d_up = -cross(look_direction, d_right).unit();
+        }
+
+        Line3 generate_ray(double x_pos, double y_pos) {
+            Line3 ray;
+
+            // ray origin
+            Vec3 ray_origin = origin;
+            if (defocus_blur_radius > 0) { ray_origin += defocus_blur_radius * sqrt(random_double()) * (d_up * normal_double() + d_right * normal_double()).unit(); } // defocus blur ray (start the ray from a random point on defocus blur disc)
+
+            // ray point on viewport
+            Vec3 ray_viewport = origin + look_direction * focal_length; // to viewport centre
+            ray_viewport += d_right * viewport_width * x_pos; // add viewport x position
+            ray_viewport += d_up * viewport_height * y_pos; // add viewport y position
+
+            ray.p = ray_origin;
+            ray.d = ray_viewport - ray_origin;
+            ray.d = ray.d.unit();
+
+            return ray;
         }
 };
 
@@ -259,9 +283,11 @@ Colour ray_recur(int n, Line3& ray, bool do_trace) {
     } else { // if hit 'sky' (i.e. if nothing else was hit)...
         // rtow colour scheme
         double t = 0.5*(ray.d.unit().z + 1.0);
-        return (1.0-t)*Colour(1.0, 1.0, 1.0) + t*Colour(0.5, 0.7, 1.0);
+        Colour faded_blue{0.5, 0.7, 1.0};
+        Colour sky_blue = Colour(25, 114, 255)/255.0;
+        return (1.0-t)*Colour(1.0, 1.0, 1.0) + t*sky_blue;
 
-        // quadrants colour scheme
+        // quadrants colour scheme, for debugging
         // if (ray.d.unit().x >=0) {
         //     if (ray.d.unit().z >= 0) {
         //         return Colour(0.0, 0.0, 0.0); // top-right black
@@ -279,8 +305,8 @@ Colour ray_recur(int n, Line3& ray, bool do_trace) {
 }
 
 int main() {
-    int width{1600};
-    int height{900};
+    int width{1920};
+    int height{1080};
 
     ImageVec img(width, height);
     double aspect_ratio = static_cast<double>(width) / static_cast<double>(height);
@@ -288,46 +314,60 @@ int main() {
     // default camera
     // Camera cam(aspect_ratio);
 
-    // Camera(Vec3 viewport_centre, Vec3 lookat, double aspect_ratio, double focal_length)  <- definition
-    // camera from above, behind and to the left
-    Camera cam(Vec3(-2,-1,2), Vec3(0,1,0), aspect_ratio, 20, 0.1);
+    Vec3 lookfrom{0.3,-1,-0.03};
+    // Vec3 lookfrom{0.1,0.1,1};
+    Vec3 lookat{0.12,0,0};
+    Camera cam(aspect_ratio, lookat, lookat-lookfrom, 2.5, 40, 0.5);
 
     // 2 spheres scene
-    // Sphere3 sphere1(Vec3(0,4,0), 2, Material::glass, Colour(0.7, 0.3, 0.3), 0);
-    // Sphere3 sphere2(Vec3(0,4,-102), 100, Material::matte, Colour(0.7, 0.3, 0.3), 0);
+    // Sphere3 sphere1(Vec3(0,3,0), 2, Material::glass, Colour(0.7, 0.3, 0.3), 0);
+    // Sphere3 sphere2(Vec3(0,3,-102), 100, Material::matte, Colour(0.7, 0.3, 0.3), 0);
 
     // 3 spheres scene
-    // Sphere3 sphere1(Vec3(0,1,0), 0.5, Material::matte, Colour(0.7, 0.3, 0.3), 0);
-    // Sphere3 sphere2(Vec3(-1,1,0), 0.5, Material::metal, Colour(0.8, 0.8, 0.8), 0.0);
-    // Sphere3 sphere3(Vec3(1,1,0), 0.5, Material::metal, Colour(0.8, 0.6, 0.2), 0.0);
-    // Sphere3 sphere4(Vec3(0,1,-100.5), 100, Material::matte, Colour(0.8, 0.8, 0.0), 0);
-
-    // Ray Tracing in One Weekend scene
-    Sphere3 sphere1(Vec3(0,1,-100.5), 100, Material::matte, Colour(0.8,0.8,0.0), 0);
-    Sphere3 sphere2(Vec3(0,1,0), 0.5, Material::matte, Colour(0.1,0.2,0.5), 0);
-    Sphere3 sphere3(Vec3(1,1,0), 0.5, Material::metal, Colour(0.8,0.6,0.2), 0);
-    // hollow glass sphere
-    Sphere3 sphere4(Vec3(-1,1,0), 0.5, Material::glass, Colour(0.8,0.8,0.8), 0);
-    Sphere3 sphere5(Vec3(-1,1,0), 0.4, Material::glass, Colour(0.8,0.8,0.8), 0, true);
+    // Sphere3 sphere1(Vec3(0,0,0), 0.5, Material::matte, Colour(0.7, 0.3, 0.3), 0);
+    // Sphere3 sphere2(Vec3(-1,0,0), 0.5, Material::metal, Colour(0.8, 0.8, 0.8), 0.0);
+    // Sphere3 sphere3(Vec3(1,0,0), 0.5, Material::metal, Colour(0.8, 0.6, 0.2), 0.0);
+    // Sphere3 sphere4(Vec3(0,0,-100.5), 100, Material::matte, Colour(0.8, 0.8, 0.0), 0);
 
     // refraction test scene
-    // Sphere3 sphere1(Vec3(0,1,0), 0.5, Material::glass, Colour(0.8,0.8,0.8), 0);
-    // Sphere3 sphere2(Vec3(0,1,0), 0.4, Material::glass, Colour(0.8,0.8,0.8), 0, true);
+    // Sphere3 sphere1(Vec3(0,0,0), 0.5, Material::glass, Colour(0.8,0.8,0.8), 0);
+    // Sphere3 sphere2(Vec3(0,0,0), 0.4, Material::glass, Colour(0.8,0.8,0.8), 0, true);
+
+    // Github photo scene
+    // ground and two large spheres
+    Sphere3 sphere1(Vec3(0,0,-100.5), 100, Material::matte, Colour(0.5,0.5,0.5), 0);
+    Sphere3 sphere2(Vec3(0,0,0), 0.5, Material::matte, Colour(0.1,0.2,0.5), 0);
+    Sphere3 sphere3(Vec3(1,0,0), 0.5, Material::metal, Colour(163, 28, 28)/255.0, 0);
+    // large hollow glass sphere
+    Sphere3 sphere4(Vec3(-1,0,0), 0.5, Material::glass, Colour(0.8,0.8,0.8), 0);
+    Sphere3 sphere5(Vec3(-1,0,0), 0.4, Material::glass, Colour(0.8,0.8,0.8), 0, true);
+    // smaller foreground spheres
+    Sphere3 sphere6(Vec3(-0.1,-0.8,-0.3), 0.2, Material::glass, Colour(0.8,0.8,0.8), 0);
+    Sphere3 sphere7(Vec3(1.2,-0.85,-0.4), 0.1, Material::metal, Colour(0.8, 0.8, 0.8), 0.0);
+    Sphere3 sphere8(Vec3(0.1,-1.0,-0.38), 0.12, Material::matte, Colour(173, 21, 133)/255.0, 0);
+    Sphere3 sphere9(Vec3(0.6,-0.75,-0.25), 0.25, Material::metal, Colour(19, 173, 119)/255.0, 0);
 
     hittables.push_back(&sphere1);
     hittables.push_back(&sphere2);
     hittables.push_back(&sphere3);
     hittables.push_back(&sphere4);
     hittables.push_back(&sphere5);
+    hittables.push_back(&sphere6);
+    hittables.push_back(&sphere7);
+    hittables.push_back(&sphere8);
+    hittables.push_back(&sphere9);
 
     // render!
-    std::cout << "start loop";
     for (double y_pixel = 0; y_pixel < img.height; y_pixel++) {
+        // progress indicator
+        if (abs(fmod(y_pixel, 10)) < 1e-10) {
+            std::cout << 100 * y_pixel / height << "%\n";
+        }
+
         for (double x_pixel = 0; x_pixel < img.width; x_pixel++) {
-            
-            // select a ray and print out its coordinates
-            double x_trace = 800;
-            double y_trace = 708;
+            // select a ray and print out its coordinates, for debugging
+            double x_trace = -1;
+            double y_trace = -1;
             bool do_trace = false;
             if (x_pixel == x_trace && y_pixel == y_trace) {
                 do_trace = true;
@@ -337,19 +377,15 @@ int main() {
             Colour running_colour{0,0,0};
 
             // n_antialias rays for antialiasing
-            int n_antialias = 4;
+            int n_antialias = 200;
             for (int i = 0; i < n_antialias; i++) {
                 // Make ray
-                Line3 ray;
-                ray.p = cam.origin;
-                ray.d += cam.look_direction * cam.focal_length;
-                ray.d += cam.d_right * cam.viewport_width*((x_pixel + random_double())/img.width - 0.5);
-                ray.d += cam.d_up * cam.viewport_height*((y_pixel + random_double())/img.height - 0.5);
-                // ray.d -= cam.defocus_blur_radius * sqrt(random_double()) * (cam.d_up * normal_double() + cam.d_right * normal_double()).unit(); // defocus blur ray (start the ray from a random point on defocus blur disc)
-                ray.d = ray.d.unit();
+                double x_pos = (x_pixel + random_double())/img.width - 0.5; // -0.5 to 0.5 position along viewport width
+                double y_pos = (y_pixel + random_double())/img.height - 0.5; // -0.5 to 0.5 position along viewport height
+                Line3 ray = cam.generate_ray(x_pos, y_pos);
 
                 // first argument is maximum recur depth
-                running_colour += ray_recur(10, ray, do_trace); // start with refractive_index=1 (air)
+                running_colour += ray_recur(50, ray, do_trace); // start with refractive_index=1 (air)
             }
             // average
             running_colour /= n_antialias + 1;
@@ -364,7 +400,6 @@ int main() {
             }
         }
     }
-    std::cout << "end loop";
 
     std::stringstream string_stream;
     string_stream << "images/" << time(NULL) << ".png";
