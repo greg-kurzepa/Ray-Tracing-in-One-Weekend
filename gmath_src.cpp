@@ -13,13 +13,13 @@ namespace gmath {
     // Functions
 
     /// @brief 
-    /// @return random double in range [0,1), i.e. including 0 but not 1
+    /// @return random uniform double in range [0,1), i.e. including 0 but not 1
     double random_double() {
         return std::rand() / (RAND_MAX + 1.0);
     }
 
     /// @brief 
-    /// @return random double in range [min,max), i.e. including min but not max
+    /// @return random uniform double in range [min,max), i.e. including min but not max
     double random_double(double min, double max) {
         return min + (max-min)*random_double();
     }
@@ -42,6 +42,13 @@ namespace gmath {
         x += v.x;
         y += v.y;
         z += v.z;
+        return *this;
+    }
+
+    Vec3& Vec3::operator-=(const Vec3& v) {
+        x -= v.x;
+        y -= v.y;
+        z -= v.z;
         return *this;
     }
 

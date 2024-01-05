@@ -27,11 +27,14 @@ class Camera {
         Vec3 viewport_centre;
         Vec3 lookat;
         double aspect_ratio;
+        double fov_deg; // field of view angle
+        double defocus_blur_angle_deg;
+
         double focal_length;
+        double defocus_blur_radius;
         Vec3 look_direction;
         double viewport_width;
         Vec3 origin;
-
         // orthogonal unit vectors to traverse viewport
         Vec3 d_right;
         Vec3 d_up;
@@ -41,26 +44,29 @@ class Camera {
             viewport_centre(Vec3(0,1,0)),
             lookat(Vec3(0,2,0)),
             aspect_ratio(aspect_ratio),
-            focal_length(1),
-            look_direction((lookat - viewport_centre).unit()),
-            viewport_width(viewport_height * aspect_ratio),
-            origin(Vec3(0,0,0)),
-            d_right(Vec3(1,0,0)),
-            d_up(Vec3(0,0,1))
-        {}
+            fov_deg(90),
+            defocus_blur_angle_deg(10)
+        { setup(); }
 
         // any setting
-        Camera(Vec3 viewport_centre, Vec3 lookat, double aspect_ratio, double focal_length) :
+        Camera(Vec3 viewport_centre, Vec3 lookat, double aspect_ratio, double fov_deg, double defocus_blur_angle_deg) :
             viewport_centre(viewport_centre),
             lookat(lookat),
             aspect_ratio(aspect_ratio),
-            focal_length(focal_length),
-            look_direction((lookat - viewport_centre).unit()),
-            viewport_width(viewport_height * aspect_ratio),
-            origin(viewport_centre - look_direction * focal_length),
-            d_right(cross(look_direction, up).unit()),
-            d_up(-cross(look_direction, d_right).unit())
-        {}
+            fov_deg(fov_deg),
+            defocus_blur_angle_deg(defocus_blur_angle_deg)
+        { setup(); }
+
+        void setup() {
+            focal_length = (lookat - viewport_centre).abs();;
+            defocus_blur_radius = focal_length * tan(defocus_blur_angle_deg * pi/180 * 0.5); // focal_length * tan(theta/2)
+            std::cout << "DEFOCUS BLUR RADIUS: " << defocus_blur_radius << "\n";
+            look_direction = (lookat - viewport_centre).unit();
+            viewport_width = viewport_height * aspect_ratio;
+            origin = viewport_centre - look_direction * focal_length;
+            d_right = cross(look_direction, up).unit();
+            d_up = -cross(look_direction, d_right).unit();
+        }
 };
 
 class Line3 {
@@ -154,14 +160,14 @@ class Sphere3 : public Hittable {
                 case Material::matte: {
                     // New ray for next iteration, selected randomly from a unit sphere tangential to the intersected surface
                     // As in https://math.stackexchange.com/questions/87230/picking-random-points-in-the-volume-of-sphere-with-uniform-probability
-                    Vec3 X{normal_double(), normal_double(), normal_double()};
+                    Vec3 X = Vec3(normal_double(), normal_double(), normal_double()).unit(); // random point on surface of sphere
                     // Line3 next_ray{ray(t), normal_unit + (X * std::pow(random_double(), 1.0/3.0) / X.abs())}; // random point *in* sphere
-                    ret_ray = Line3(ray(t), (normal_unit + X / X.abs()));
+                    ret_ray = Line3(ray(t), (normal_unit + X));
                     break;
                 }
                 case Material::metal: {
-                    Vec3 X{normal_double(), normal_double(), normal_double()};
-                    ret_ray = Line3(ray(t), ray.d - 2*normal_unit*dot(ray.d, normal_unit) + fuzz * X / X.abs());
+                    Vec3 X = Vec3(normal_double(), normal_double(), normal_double()).unit();
+                    ret_ray = Line3(ray(t), ray.d - 2*normal_unit*dot(ray.d, normal_unit) + fuzz * X);
                     break;
                 }
                 case Material::glass: {
@@ -284,7 +290,7 @@ int main() {
 
     // Camera(Vec3 viewport_centre, Vec3 lookat, double aspect_ratio, double focal_length)  <- definition
     // camera from above, behind and to the left
-    Camera cam(Vec3(-2,-1,2), Vec3(0,1,0), aspect_ratio, 10);
+    Camera cam(Vec3(-2,-1,2), Vec3(0,1,0), aspect_ratio, 20, 0.1);
 
     // 2 spheres scene
     // Sphere3 sphere1(Vec3(0,4,0), 2, Material::glass, Colour(0.7, 0.3, 0.3), 0);
@@ -339,6 +345,7 @@ int main() {
                 ray.d += cam.look_direction * cam.focal_length;
                 ray.d += cam.d_right * cam.viewport_width*((x_pixel + random_double())/img.width - 0.5);
                 ray.d += cam.d_up * cam.viewport_height*((y_pixel + random_double())/img.height - 0.5);
+                // ray.d -= cam.defocus_blur_radius * sqrt(random_double()) * (cam.d_up * normal_double() + cam.d_right * normal_double()).unit(); // defocus blur ray (start the ray from a random point on defocus blur disc)
                 ray.d = ray.d.unit();
 
                 // first argument is maximum recur depth
