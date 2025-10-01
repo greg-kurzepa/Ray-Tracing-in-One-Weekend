@@ -12,5 +12,5 @@ Following along with the explanations, I implemented my own version of the code.
 
 To compile for yourself, run `g++ -Wall -o out *.cpp` in the project's root directory.
 
-### Example Image
+### Example Render
 ![alt text](https://github.com/suspicious-salmon/Ray-Tracing-in-One-Weekend/blob/master/cover_image.png?raw=true)
